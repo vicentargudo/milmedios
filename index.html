@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#2d7a4f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Mi Huerto - Diario</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="header">
+    <h1>
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/><path d="M12 8c-2 0-4 1.5-4 4s2 5 4 7c2-2 4-3.5 4-7s-2-4-4-4z"/><line x1="12" y1="8" x2="12" y2="2"/></svg>
+      Mi Huerto
+    </h1>
+    <div class="header-subtitle">Partida Mariola, 26 &middot; Alcoi &middot; 5&times;80m SO</div>
+  </header>
+
+  <!-- ===== INICIO ===== -->
+  <section id="sec-inicio" class="section active">
+    <div class="card">
+      <div class="card-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--water)" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/></svg>
+        Clima Ahora
+      </div>
+      <div id="weather-now" class="weather-grid">
+        <div class="weather-item"><div class="value">--</div><div class="label">Temperatura</div></div>
+        <div class="weather-item"><div class="value">--</div><div class="label">Humedad</div></div>
+        <div class="weather-item"><div class="value">--</div><div class="label">Lluvia</div></div>
+        <div class="weather-item"><div class="value">--</div><div class="label">Viento</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--sun)" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        Previsión 7 Días
+      </div>
+      <div id="weather-forecast" class="weather-forecast">
+        <div class="forecast-day"><div class="date">--</div><div class="temp">--</div></div>
+      </div>
+    </div>
+
+    <div class="card reco-card">
+      <div class="card-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--green-mid)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+        Recomendaciones
+      </div>
+      <div id="recommendations" class="reco-text">Cargando recomendaciones...</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Próximas Tareas</div>
+      <div id="upcoming-tasks"></div>
+    </div>
+  </section>
+
+  <!-- ===== DIARIO ===== -->
+  <section id="sec-diario" class="section">
+    <h2 style="font-size:1.1rem; margin-bottom:12px;">Diario del Huerto</h2>
+    <div id="diary-list"></div>
+  </section>
+
+  <!-- ===== PLANIFICADOR ===== -->
+  <section id="sec-planner" class="section">
+    <h2 style="font-size:1.1rem; margin-bottom:12px;">Planificador de Bancales</h2>
+    <div class="card">
+      <div class="card-title">
+        Tu Huerto: 5m &times; 80m
+        <span class="orientation-badge">SO &uarr;</span>
+      </div>
+      <p style="font-size:0.8rem; color:var(--text-light); margin-bottom:12px;">
+        Distribución recomendada en bancales de 1.2m de ancho con pasillos de 0.5m.
+        Rotación: tomates y pimientos nunca juntos en el mismo bancal dos temporadas seguidas.
+      </p>
+      <div id="garden-layout" class="garden-map"></div>
+    </div>
+
+    <div class="card reco-card">
+      <div class="card-title">Consejo de Siembra</div>
+      <div id="planting-advice" class="reco-text"></div>
+    </div>
+  </section>
+
+  <!-- ===== TAREAS ===== -->
+  <section id="sec-tareas" class="section">
+    <h2 style="font-size:1.1rem; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+      Tareas
+      <button class="btn-secondary" onclick="openTaskModal()">+ Tarea</button>
+    </h2>
+    <div id="task-list"></div>
+  </section>
+
+  <!-- ===== CLIMA ===== -->
+  <section id="sec-clima" class="section">
+    <h2 style="font-size:1.1rem; margin-bottom:12px;">Historial del Clima</h2>
+    <div class="card">
+      <div class="card-title">Últimos 14 Días</div>
+      <div id="weather-history" style="overflow-x:auto;"></div>
+    </div>
+  </section>
+
+  <!-- FAB for diary entry -->
+  <button class="fab" id="fab-add" onclick="openDiaryModal()">+</button>
+
+  <!-- ===== MODAL: Nueva Entrada Diario ===== -->
+  <div class="modal-overlay" id="modal-diary">
+    <div class="modal">
+      <h2>Nueva Entrada <button onclick="closeModal('modal-diary')">&times;</button></h2>
+      <form id="form-diary" onsubmit="saveDiaryEntry(event)">
+        <div class="form-group">
+          <label>Fecha</label>
+          <input type="date" id="diary-date" required>
+        </div>
+        <div class="form-group">
+          <label>Cultivos</label>
+          <div class="crop-chips" id="diary-crops">
+            <span class="crop-chip" data-crop="tomate" onclick="toggleCropChip(this)">Tomate</span>
+            <span class="crop-chip" data-crop="pimiento" onclick="toggleCropChip(this)">Pimiento</span>
+            <span class="crop-chip" data-crop="calabacin" onclick="toggleCropChip(this)">Calabacin</span>
+            <span class="crop-chip" data-crop="pepino" onclick="toggleCropChip(this)">Pepino</span>
+            <span class="crop-chip" data-crop="general" onclick="toggleCropChip(this)">General</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Tipo de actividad</label>
+          <select id="diary-type">
+            <option value="observacion">Observación</option>
+            <option value="siembra">Siembra</option>
+            <option value="semillero">Semillero</option>
+            <option value="trasplante">Trasplante</option>
+            <option value="riego">Riego</option>
+            <option value="abonado">Abonado</option>
+            <option value="tratamiento">Tratamiento</option>
+            <option value="cosecha">Cosecha</option>
+            <option value="labrar">Labrar</option>
+            <option value="acolchado">Acolchado</option>
+            <option value="poda">Poda</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Notas</label>
+          <textarea id="diary-notes" placeholder="Escribe lo que has hecho hoy..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>Multimedia</label>
+          <div class="media-buttons">
+            <button type="button" class="media-btn" onclick="document.getElementById('input-photo').click()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+              Foto
+            </button>
+            <button type="button" class="media-btn" onclick="document.getElementById('input-video').click()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              Vídeo
+            </button>
+            <button type="button" class="media-btn" id="btn-audio" onclick="toggleAudioRecording()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+              Audio
+            </button>
+          </div>
+          <input type="file" id="input-photo" accept="image/*" capture="environment" multiple hidden onchange="previewMedia(this, 'image')">
+          <input type="file" id="input-video" accept="video/*" capture="environment" hidden onchange="previewMedia(this, 'video')">
+          <div class="media-preview" id="media-preview"></div>
+        </div>
+        <button type="submit" class="btn-primary">Guardar Entrada</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ===== MODAL: Nueva Tarea ===== -->
+  <div class="modal-overlay" id="modal-task">
+    <div class="modal">
+      <h2>Nueva Tarea <button onclick="closeModal('modal-task')">&times;</button></h2>
+      <form id="form-task" onsubmit="saveTask(event)">
+        <div class="form-group">
+          <label>Tarea</label>
+          <input type="text" id="task-name" placeholder="Ej: Labrar el huerto" required>
+        </div>
+        <div class="form-group">
+          <label>Fecha</label>
+          <input type="date" id="task-date" required>
+        </div>
+        <div class="form-group">
+          <label>Prioridad</label>
+          <select id="task-priority">
+            <option value="alta">Alta</option>
+            <option value="media" selected>Media</option>
+            <option value="baja">Baja</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Categoría</label>
+          <select id="task-category">
+            <option value="labrar">Labrar</option>
+            <option value="riego">Riego</option>
+            <option value="acolchado">Acolchado</option>
+            <option value="siembra">Siembra</option>
+            <option value="semillero">Semillero</option>
+            <option value="trasplante">Trasplante</option>
+            <option value="abonado">Abonado</option>
+            <option value="tratamiento">Tratamiento</option>
+            <option value="cosecha">Cosecha</option>
+            <option value="poda">Poda</option>
+            <option value="otro">Otro</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Notas</label>
+          <textarea id="task-notes" placeholder="Detalles opcionales..."></textarea>
+        </div>
+        <button type="submit" class="btn-primary">Guardar Tarea</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-section="sec-inicio" onclick="switchSection(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Inicio
+    </button>
+    <button class="nav-item" data-section="sec-diario" onclick="switchSection(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+      Diario
+    </button>
+    <button class="nav-item" data-section="sec-planner" onclick="switchSection(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Plano
+    </button>
+    <button class="nav-item" data-section="sec-tareas" onclick="switchSection(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+      Tareas
+    </button>
+    <button class="nav-item" data-section="sec-clima" onclick="switchSection(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/><circle cx="12" cy="12" r="4"/></svg>
+      Clima
+    </button>
+  </nav>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
