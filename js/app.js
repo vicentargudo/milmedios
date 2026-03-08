@@ -1,5 +1,5 @@
 // ============================================================
-// Mi Huerto - Diario de Huerto
+// Mi Huerto - Diario de Huerto (Compartido)
 // Partida Mariola, 26 - Alcoi (Alicante)
 // Coordenadas aprox: 38.71°N, -0.47°W
 // Huerto: 5m x 80m, orientación Suroeste
@@ -8,34 +8,66 @@
 const CONFIG = {
   lat: 38.71,
   lon: -0.47,
-  gardenWidth: 5,    // metros
-  gardenLength: 80,  // metros
+  gardenWidth: 5,
+  gardenLength: 80,
   orientation: 'SO',
   location: 'Partida Mariola, 26 - Alcoi',
   crops: ['tomate', 'pimiento', 'calabacin', 'pepino'],
 };
 
+const API = '';  // Same origin; change to 'https://tudominio.com' if needed
+
 // ============================================================
-// LOCAL STORAGE (IndexedDB wrapper using localStorage for simplicity)
+// API HELPERS
 // ============================================================
-const DB = {
-  get(key) {
-    try {
-      return JSON.parse(localStorage.getItem('huerto_' + key)) || [];
-    } catch { return []; }
-  },
-  set(key, data) {
-    localStorage.setItem('huerto_' + key, JSON.stringify(data));
-  },
-  getObj(key) {
-    try {
-      return JSON.parse(localStorage.getItem('huerto_' + key)) || {};
-    } catch { return {}; }
-  },
-  setObj(key, data) {
-    localStorage.setItem('huerto_' + key, JSON.stringify(data));
-  }
-};
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  return res.json();
+}
+
+async function uploadFile(file) {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch(API + '/api/upload', { method: 'POST', body: form });
+  return res.json();
+}
+
+// ============================================================
+// AUTHOR (para saber quién escribe)
+// ============================================================
+function getAuthor() {
+  return localStorage.getItem('huerto_author') || '';
+}
+
+function setAuthor(name) {
+  localStorage.setItem('huerto_author', name);
+}
+
+function showAuthorPicker() {
+  const current = getAuthor();
+  if (current) return; // Already set
+
+  const overlay = document.getElementById('modal-author');
+  overlay.classList.add('open');
+}
+
+function saveAuthor() {
+  const name = document.getElementById('author-name').value.trim();
+  if (!name) return;
+  setAuthor(name);
+  closeModal('modal-author');
+  updateAuthorDisplay();
+}
+
+function updateAuthorDisplay() {
+  const el = document.getElementById('current-author');
+  if (el) el.textContent = getAuthor() || 'Anónimo';
+}
 
 // ============================================================
 // NAVIGATION
@@ -47,7 +79,6 @@ function switchSection(btn) {
   document.getElementById(sectionId).classList.add('active');
   btn.classList.add('active');
 
-  // Show FAB only on diary
   const fab = document.getElementById('fab-add');
   fab.style.display = (sectionId === 'sec-diario' || sectionId === 'sec-inicio') ? 'flex' : 'none';
 }
@@ -73,7 +104,6 @@ function closeModal(id) {
   document.getElementById(id).classList.remove('open');
 }
 
-// Close modal on overlay click
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) overlay.classList.remove('open');
@@ -89,20 +119,19 @@ function toggleCropChip(el) {
   el.classList.toggle('selected');
 }
 
-function previewMedia(input, type) {
+function previewMediaFile(input, type) {
   const preview = document.getElementById('media-preview');
   for (const file of input.files) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target.result;
-      pendingMedia.push({ type, data: dataUrl, name: file.name });
-      if (type === 'image') {
-        preview.innerHTML += `<img src="${dataUrl}" alt="foto">`;
-      } else if (type === 'video') {
-        preview.innerHTML += `<video src="${dataUrl}" controls></video>`;
-      }
-    };
-    reader.readAsDataURL(file);
+    // Store actual File objects for upload
+    pendingMedia.push({ type, file, name: file.name });
+
+    // Show preview
+    const url = URL.createObjectURL(file);
+    if (type === 'image') {
+      preview.innerHTML += `<img src="${url}" alt="foto">`;
+    } else if (type === 'video') {
+      preview.innerHTML += `<video src="${url}" controls></video>`;
+    }
   }
 }
 
@@ -120,13 +149,11 @@ function toggleAudioRecording() {
       mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
       mediaRecorder.onstop = () => {
         const blob = new Blob(audioChunks, { type: 'audio/webm' });
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          pendingMedia.push({ type: 'audio', data: e.target.result, name: 'audio.webm' });
-          const preview = document.getElementById('media-preview');
-          preview.innerHTML += `<audio src="${e.target.result}" controls></audio>`;
-        };
-        reader.readAsDataURL(blob);
+        const file = new File([blob], 'audio.webm', { type: 'audio/webm' });
+        pendingMedia.push({ type: 'audio', file, name: 'audio.webm' });
+        const preview = document.getElementById('media-preview');
+        const url = URL.createObjectURL(blob);
+        preview.innerHTML += `<audio src="${url}" controls></audio>`;
         stream.getTracks().forEach(t => t.stop());
       };
       mediaRecorder.start();
@@ -142,42 +169,66 @@ function toggleAudioRecording() {
   }
 }
 
-function saveDiaryEntry(e) {
+async function saveDiaryEntry(e) {
   e.preventDefault();
-  const crops = [];
-  document.querySelectorAll('#diary-crops .crop-chip.selected').forEach(c => crops.push(c.dataset.crop));
 
-  const entry = {
-    id: Date.now(),
-    date: document.getElementById('diary-date').value,
-    type: document.getElementById('diary-type').value,
-    crops: crops,
-    notes: document.getElementById('diary-notes').value,
-    media: pendingMedia.slice(),
-  };
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Guardando...';
 
-  const entries = DB.get('diary');
-  entries.unshift(entry);
-  DB.set('diary', entries);
+  try {
+    // Upload media files first
+    const mediaUrls = [];
+    for (const m of pendingMedia) {
+      const result = await uploadFile(m.file);
+      if (result.ok) {
+        mediaUrls.push({ type: result.type, url: result.url, name: result.name });
+      }
+    }
 
-  closeModal('modal-diary');
-  document.getElementById('form-diary').reset();
-  renderDiary();
-  renderUpcomingTasks();
+    const crops = [];
+    document.querySelectorAll('#diary-crops .crop-chip.selected').forEach(c => crops.push(c.dataset.crop));
+
+    await api('POST', '/api/diary', {
+      date: document.getElementById('diary-date').value,
+      type: document.getElementById('diary-type').value,
+      crops,
+      notes: document.getElementById('diary-notes').value,
+      media: mediaUrls,
+      author: getAuthor(),
+    });
+
+    closeModal('modal-diary');
+    document.getElementById('form-diary').reset();
+    await loadDiary();
+    await loadUpcomingTasks();
+  } catch (err) {
+    alert('Error al guardar: ' + err.message);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Guardar Entrada';
+  }
 }
 
-function deleteDiaryEntry(id) {
+async function deleteDiaryEntry(id) {
   if (!confirm('¿Eliminar esta entrada?')) return;
-  const entries = DB.get('diary').filter(e => e.id !== id);
-  DB.set('diary', entries);
-  renderDiary();
+  await api('DELETE', `/api/diary/${id}`);
+  await loadDiary();
 }
 
-function renderDiary() {
-  const entries = DB.get('diary');
+async function loadDiary() {
+  try {
+    const entries = await api('GET', '/api/diary');
+    renderDiary(entries);
+  } catch {
+    document.getElementById('diary-list').innerHTML = '<p style="color:var(--text-light)">Error cargando el diario.</p>';
+  }
+}
+
+function renderDiary(entries) {
   const container = document.getElementById('diary-list');
 
-  if (entries.length === 0) {
+  if (!entries || entries.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
@@ -186,28 +237,30 @@ function renderDiary() {
     return;
   }
 
+  const typeLabels = {
+    observacion: 'Observación', siembra: 'Siembra', semillero: 'Semillero',
+    trasplante: 'Trasplante', riego: 'Riego', abonado: 'Abonado',
+    tratamiento: 'Tratamiento', cosecha: 'Cosecha', labrar: 'Labrar',
+    acolchado: 'Acolchado', poda: 'Poda', otro: 'Otro'
+  };
+
   container.innerHTML = entries.map(entry => {
     const tagsHtml = (entry.crops || []).map(c =>
       `<span class="tag tag-${c}">${c}</span>`
     ).join('');
 
     const mediaHtml = (entry.media || []).map(m => {
-      if (m.type === 'image') return `<img src="${m.data}" alt="foto" onclick="window.open(this.src)">`;
-      if (m.type === 'video') return `<video src="${m.data}" controls></video>`;
-      if (m.type === 'audio') return `<audio src="${m.data}" controls></audio>`;
+      if (m.type === 'image') return `<img src="${m.url}" alt="foto" onclick="window.open(this.src)">`;
+      if (m.type === 'video') return `<video src="${m.url}" controls></video>`;
+      if (m.type === 'audio') return `<audio src="${m.url}" controls></audio>`;
       return '';
     }).join('');
 
-    const typeLabels = {
-      observacion: 'Observación', siembra: 'Siembra', semillero: 'Semillero',
-      trasplante: 'Trasplante', riego: 'Riego', abonado: 'Abonado',
-      tratamiento: 'Tratamiento', cosecha: 'Cosecha', labrar: 'Labrar',
-      acolchado: 'Acolchado', poda: 'Poda', otro: 'Otro'
-    };
+    const authorHtml = entry.author ? `<span style="color:var(--green-mid);font-weight:600;">· ${escapeHtml(entry.author)}</span>` : '';
 
     return `
       <div class="card diary-entry">
-        <div class="diary-date">${formatDate(entry.date)} &middot; ${typeLabels[entry.type] || entry.type}</div>
+        <div class="diary-date">${formatDate(entry.date)} · ${typeLabels[entry.type] || entry.type} ${authorHtml}</div>
         <div class="diary-text">${escapeHtml(entry.notes)}</div>
         <div class="diary-tags">${tagsHtml}</div>
         ${mediaHtml ? `<div class="diary-media">${mediaHtml}</div>` : ''}
@@ -221,53 +274,67 @@ function renderDiary() {
 // ============================================================
 // TASKS
 // ============================================================
-function saveTask(e) {
+async function saveTask(e) {
   e.preventDefault();
-  const task = {
-    id: Date.now(),
-    name: document.getElementById('task-name').value,
-    date: document.getElementById('task-date').value,
-    priority: document.getElementById('task-priority').value,
-    category: document.getElementById('task-category').value,
-    notes: document.getElementById('task-notes').value,
-    done: false,
-  };
 
-  const tasks = DB.get('tasks');
-  tasks.push(task);
-  DB.set('tasks', tasks);
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Guardando...';
 
-  closeModal('modal-task');
-  document.getElementById('form-task').reset();
-  renderTasks();
-  renderUpcomingTasks();
+  try {
+    await api('POST', '/api/tasks', {
+      name: document.getElementById('task-name').value,
+      date: document.getElementById('task-date').value,
+      priority: document.getElementById('task-priority').value,
+      category: document.getElementById('task-category').value,
+      notes: document.getElementById('task-notes').value,
+      author: getAuthor(),
+    });
+
+    closeModal('modal-task');
+    document.getElementById('form-task').reset();
+    await loadTasks();
+    await loadUpcomingTasks();
+  } catch (err) {
+    alert('Error al guardar tarea: ' + err.message);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Guardar Tarea';
+  }
 }
 
-function toggleTask(id) {
-  const tasks = DB.get('tasks');
+async function toggleTask(id) {
+  // Find current state from rendered data
+  const tasks = window._cachedTasks || [];
   const task = tasks.find(t => t.id === id);
-  if (task) task.done = !task.done;
-  DB.set('tasks', tasks);
-  renderTasks();
-  renderUpcomingTasks();
+  if (!task) return;
+
+  await api('PATCH', `/api/tasks/${id}`, { done: !task.done });
+  await loadTasks();
+  await loadUpcomingTasks();
 }
 
-function deleteTask(id) {
+async function deleteTask(id) {
   if (!confirm('¿Eliminar esta tarea?')) return;
-  const tasks = DB.get('tasks').filter(t => t.id !== id);
-  DB.set('tasks', tasks);
-  renderTasks();
-  renderUpcomingTasks();
+  await api('DELETE', `/api/tasks/${id}`);
+  await loadTasks();
+  await loadUpcomingTasks();
 }
 
-function renderTasks() {
-  const tasks = DB.get('tasks').sort((a, b) => {
-    if (a.done !== b.done) return a.done ? 1 : -1;
-    return a.date.localeCompare(b.date);
-  });
+async function loadTasks() {
+  try {
+    const tasks = await api('GET', '/api/tasks');
+    window._cachedTasks = tasks;
+    renderTasks(tasks);
+  } catch {
+    document.getElementById('task-list').innerHTML = '<p style="color:var(--text-light)">Error cargando tareas.</p>';
+  }
+}
+
+function renderTasks(tasks) {
   const container = document.getElementById('task-list');
 
-  if (tasks.length === 0) {
+  if (!tasks || tasks.length === 0) {
     container.innerHTML = '<div class="empty-state"><p>No hay tareas. Pulsa "+ Tarea" para crear una.</p></div>';
     return;
   }
@@ -279,7 +346,7 @@ function renderTasks() {
       </div>
       <div class="task-info">
         <div class="task-name">${escapeHtml(t.name)}</div>
-        <div class="task-date">${formatDate(t.date)} &middot; ${t.category}</div>
+        <div class="task-date">${formatDate(t.date)} · ${t.category}${t.author ? ' · ' + escapeHtml(t.author) : ''}</div>
         ${t.notes ? `<div style="font-size:0.75rem;color:var(--text-light);margin-top:2px;">${escapeHtml(t.notes)}</div>` : ''}
       </div>
       <span class="task-priority priority-${t.priority}">${t.priority}</span>
@@ -288,14 +355,17 @@ function renderTasks() {
   `).join('');
 }
 
-function renderUpcomingTasks() {
-  const tasks = DB.get('tasks')
-    .filter(t => !t.done)
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .slice(0, 5);
+async function loadUpcomingTasks() {
+  try {
+    const tasks = await api('GET', '/api/tasks');
+    const pending = tasks.filter(t => !t.done).slice(0, 5);
+    renderUpcomingTasks(pending);
+  } catch {}
+}
 
+function renderUpcomingTasks(tasks) {
   const container = document.getElementById('upcoming-tasks');
-  if (tasks.length === 0) {
+  if (!tasks || tasks.length === 0) {
     container.innerHTML = '<p style="font-size:0.85rem;color:var(--text-light);">No hay tareas pendientes.</p>';
     return;
   }
@@ -317,34 +387,37 @@ function renderUpcomingTasks() {
 // ============================================================
 async function loadWeather() {
   try {
-    // Current weather
     const currentUrl = `https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.lat}&longitude=${CONFIG.lon}&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,weather_code&timezone=Europe/Madrid`;
     const currentRes = await fetch(currentUrl);
     const currentData = await currentRes.json();
 
     if (currentData.current) {
       const c = currentData.current;
-      const weatherNow = document.getElementById('weather-now');
-      weatherNow.innerHTML = `
+      document.getElementById('weather-now').innerHTML = `
         <div class="weather-item"><div class="value">${c.temperature_2m}°C</div><div class="label">Temperatura</div></div>
         <div class="weather-item"><div class="value">${c.relative_humidity_2m}%</div><div class="label">Humedad</div></div>
         <div class="weather-item"><div class="value">${c.precipitation} mm</div><div class="label">Lluvia</div></div>
         <div class="weather-item"><div class="value">${c.wind_speed_10m} km/h</div><div class="label">Viento</div></div>
       `;
 
-      // Save to history
-      saveWeatherHistory(c);
+      // Save weather to backend
+      api('POST', '/api/weather', {
+        date: todayStr(),
+        temp: c.temperature_2m,
+        humidity: c.relative_humidity_2m,
+        rain: c.precipitation,
+        wind: c.wind_speed_10m,
+        weather_code: c.weather_code,
+      }).catch(() => {});
     }
 
-    // 7-day forecast
     const forecastUrl = `https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.lat}&longitude=${CONFIG.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code&timezone=Europe/Madrid&forecast_days=7`;
     const forecastRes = await fetch(forecastUrl);
     const forecastData = await forecastRes.json();
 
     if (forecastData.daily) {
       const d = forecastData.daily;
-      const forecastContainer = document.getElementById('weather-forecast');
-      forecastContainer.innerHTML = d.time.map((date, i) => `
+      document.getElementById('weather-forecast').innerHTML = d.time.map((date, i) => `
         <div class="forecast-day">
           <div class="date">${formatDateShort(date)}</div>
           <div style="font-size:1.2rem;">${weatherIcon(d.weather_code[i])}</div>
@@ -353,30 +426,11 @@ async function loadWeather() {
         </div>
       `).join('');
 
-      // Generate recommendations based on forecast
       generateRecommendations(forecastData.daily, currentData.current);
     }
   } catch (err) {
     console.error('Error loading weather:', err);
     document.getElementById('weather-now').innerHTML = '<p style="color:var(--text-light);font-size:0.85rem;">Sin conexión. Datos meteorológicos no disponibles.</p>';
-  }
-}
-
-function saveWeatherHistory(current) {
-  const history = DB.get('weather_history');
-  const today = todayStr();
-  const existing = history.find(h => h.date === today);
-  if (!existing) {
-    history.push({
-      date: today,
-      temp: current.temperature_2m,
-      humidity: current.relative_humidity_2m,
-      rain: current.precipitation,
-      wind: current.wind_speed_10m,
-    });
-    // Keep last 90 days
-    if (history.length > 90) history.shift();
-    DB.set('weather_history', history);
   }
 }
 
@@ -405,7 +459,7 @@ async function loadWeatherHistory() {
       html += '</table>';
       document.getElementById('weather-history').innerHTML = html;
     }
-  } catch (err) {
+  } catch {
     document.getElementById('weather-history').innerHTML = '<p style="color:var(--text-light)">Error cargando historial.</p>';
   }
 }
@@ -429,14 +483,12 @@ function weatherIcon(code) {
 function generateRecommendations(forecast, current) {
   const recos = [];
   const today = new Date();
-  const month = today.getMonth() + 1; // 1-12
+  const month = today.getMonth() + 1;
 
-  // Temperature-based
   const minTemps = forecast.temperature_2m_min || [];
   const maxTemps = forecast.temperature_2m_max || [];
   const hasFreeze = minTemps.some(t => t < 2);
   const hasCold = minTemps.some(t => t < 8);
-  const hasHeat = maxTemps.some(t => t > 30);
   const totalRain = (forecast.precipitation_sum || []).reduce((a, b) => a + b, 0);
 
   if (hasFreeze) {
@@ -447,52 +499,42 @@ function generateRecommendations(forecast, current) {
     recos.push('🌡️ Las noches son frescas. Los semilleros de tomate y pimiento deben estar en interior o con protección hasta que las mínimas superen los 10°C.');
   }
 
-  // Rain-based
   if (totalRain > 20) {
     recos.push('🌧️ Se esperan lluvias abundantes (' + Math.round(totalRain) + 'mm). Aplaza el labrado y asegúrate de que el drenaje del huerto funciona. No riegues estos días.');
   } else if (totalRain < 2) {
     recos.push('☀️ Semana seca. Planifica riego regular. En esta zona de Alcoi, con orientación SO, la evaporación es alta por la tarde.');
   }
 
-  // Season-based planting advice
   if (month === 3) {
-    recos.push('🌱 <b>Marzo</b>: Buen momento para semilleros de tomate y pimiento en interior. Los calabacines y pepinos pueden esperar a abril. Tienes tiempo para preparar la tierra: labrar, añadir compost y planificar los bancales.');
-    recos.push('🪱 Prepara la tierra: labra a 30cm de profundidad y añade materia orgánica (compost, estiércol bien curado). El acolchado se pondrá después del trasplante.');
+    recos.push('🌱 <b>Marzo</b>: Buen momento para semilleros de tomate y pimiento en interior. Los calabacines y pepinos pueden esperar a abril.');
+    recos.push('🪱 Prepara la tierra: labra a 30cm de profundidad y añade materia orgánica (compost, estiércol bien curado).');
   } else if (month === 4) {
-    recos.push('🌱 <b>Abril</b>: Semilleros de calabacín y pepino. Trasplante de tomates si las noches superan 10°C. Prepara los tutores para los tomates.');
+    recos.push('🌱 <b>Abril</b>: Semilleros de calabacín y pepino. Trasplante de tomates si las noches superan 10°C.');
   } else if (month === 5) {
-    recos.push('🌱 <b>Mayo</b>: Trasplante general al huerto. Instala riego por goteo y acolchado (paja o cartón). Cuidado con las últimas heladas tardías en la Mariola.');
+    recos.push('🌱 <b>Mayo</b>: Trasplante general al huerto. Instala riego por goteo y acolchado.');
   }
 
-  // Orientation specific
-  recos.push('☀️ <b>Orientación SO</b>: Tu huerto recibe sol intenso por la tarde. Los tomates y pimientos agradecerán este sol. Los pepinos y calabacines pueden necesitar algo de sombra en julio-agosto.');
+  recos.push('☀️ <b>Orientación SO</b>: Tu huerto recibe sol intenso por la tarde. Ideal para tomates y pimientos. Pepinos y calabacines pueden necesitar sombra en julio-agosto.');
 
-  const el = document.getElementById('recommendations');
-  el.innerHTML = recos.map(r => `<p style="margin-bottom:8px;">${r}</p>`).join('');
+  document.getElementById('recommendations').innerHTML = recos.map(r => `<p style="margin-bottom:8px;">${r}</p>`).join('');
 }
 
 // ============================================================
 // GARDEN PLANNER
 // ============================================================
 function renderGardenLayout() {
-  // 5m wide x 80m long
-  // Bancales de 1.2m ancho + 0.5m pasillo = 1.7m por unidad
-  // En 5m de ancho: 2 bancales + pasillos laterales (5 / 1.7 ≈ 2.9 → 2 bancales)
-  // Longitud: 80m divididos en secciones de 10m = 8 secciones por bancal
-  // Total: 2 bancales x 8 secciones = 16 parcelas
-
   const layout = [
     { bancal: 'Bancal A (norte)', sections: [
-      { crop: 'tomate', length: '20m', label: 'Tomates (20m)' },
-      { crop: 'pimiento', length: '20m', label: 'Pimientos (20m)' },
-      { crop: 'calabacin', length: '20m', label: 'Calabacines (20m)' },
-      { crop: 'pepino', length: '20m', label: 'Pepinos (20m)' },
+      { crop: 'tomate', label: 'Tomates (20m)' },
+      { crop: 'pimiento', label: 'Pimientos (20m)' },
+      { crop: 'calabacin', label: 'Calabacines (20m)' },
+      { crop: 'pepino', label: 'Pepinos (20m)' },
     ]},
     { bancal: 'Bancal B (sur)', sections: [
-      { crop: 'pimiento', length: '20m', label: 'Pimientos (20m)' },
-      { crop: 'tomate', length: '20m', label: 'Tomates (20m)' },
-      { crop: 'pepino', length: '20m', label: 'Pepinos (20m)' },
-      { crop: 'calabacin', length: '20m', label: 'Calabacines (20m)' },
+      { crop: 'pimiento', label: 'Pimientos (20m)' },
+      { crop: 'tomate', label: 'Tomates (20m)' },
+      { crop: 'pepino', label: 'Pepinos (20m)' },
+      { crop: 'calabacin', label: 'Calabacines (20m)' },
     ]},
   ];
 
@@ -513,73 +555,18 @@ function renderGardenLayout() {
   html += '</div>';
   container.innerHTML = html;
 
-  // Planting advice
   document.getElementById('planting-advice').innerHTML = `
     <p style="margin-bottom:8px;"><b>Distribución en bancal elevado (1.2m ancho):</b></p>
-    <p style="margin-bottom:6px;">🍅 <b>Tomates:</b> 2 filas, plantas a 50cm. Con 40m totales (2 bancales × 20m): ~160 plantas. Necesitan tutores de 1.5m.</p>
+    <p style="margin-bottom:6px;">🍅 <b>Tomates:</b> 2 filas, plantas a 50cm. Con 40m totales: ~160 plantas. Necesitan tutores de 1.5m.</p>
     <p style="margin-bottom:6px;">🫑 <b>Pimientos:</b> 2-3 filas, plantas a 40cm. Con 40m totales: ~200 plantas.</p>
-    <p style="margin-bottom:6px;">🥒 <b>Pepinos:</b> 1 fila con espaldera, plantas a 40cm. Con 40m: ~100 plantas. Trepar les ahorra espacio.</p>
-    <p style="margin-bottom:6px;">🥬 <b>Calabacines:</b> 1 fila, plantas a 80cm (son grandes). Con 40m: ~50 plantas. No necesitan mucho, crecen solos.</p>
+    <p style="margin-bottom:6px;">🥒 <b>Pepinos:</b> 1 fila con espaldera, plantas a 40cm. Con 40m: ~100 plantas.</p>
+    <p style="margin-bottom:6px;">🥬 <b>Calabacines:</b> 1 fila, plantas a 80cm. Con 40m: ~50 plantas.</p>
     <p style="margin-top:12px;"><b>Asociaciones favorables:</b></p>
-    <p style="margin-bottom:4px;">✅ Tomate + Pimiento: se llevan bien (misma familia, pero rotar al año siguiente)</p>
-    <p style="margin-bottom:4px;">✅ Calabacín + Pepino: ambos cucurbitáceas, buena asociación pero con distancia</p>
+    <p style="margin-bottom:4px;">✅ Tomate + Pimiento: se llevan bien (misma familia, rotar al año siguiente)</p>
+    <p style="margin-bottom:4px;">✅ Calabacín + Pepino: ambos cucurbitáceas, buena asociación con distancia</p>
     <p style="margin-bottom:4px;">✅ Intercala albahaca entre tomates (repele plagas)</p>
-    <p style="margin-top:8px;font-style:italic;color:var(--text-light);">El próximo año rota: donde había solanáceas (tomate/pimiento) pon cucurbitáceas (pepino/calabacín) y viceversa.</p>
+    <p style="margin-top:8px;font-style:italic;color:var(--text-light);">El próximo año rota: donde había solanáceas (tomate/pimiento) pon cucurbitáceas y viceversa.</p>
   `;
-}
-
-// ============================================================
-// INITIAL DEFAULT TASKS (seeds for the calendar)
-// ============================================================
-function seedDefaultTasks() {
-  if (DB.getObj('seeded').done) return;
-
-  const year = new Date().getFullYear();
-  const defaults = [
-    { name: 'Labrar el huerto (30cm profundidad)', date: `${year}-03-15`, priority: 'alta', category: 'labrar', notes: 'Labrar toda la parcela, retirar piedras y malas hierbas.' },
-    { name: 'Añadir compost/estiércol', date: `${year}-03-16`, priority: 'alta', category: 'abonado', notes: 'Mezclar compost maduro o estiércol bien curado con la tierra.' },
-    { name: 'Preparar bancales', date: `${year}-03-20`, priority: 'alta', category: 'otro', notes: 'Marcar bancales de 1.2m ancho y pasillos de 0.5m.' },
-    { name: 'Semillero de pimientos', date: `${year}-03-10`, priority: 'alta', category: 'semillero', notes: 'En interior o invernadero, temperatura 20-25°C. Tardan en germinar (10-20 días).' },
-    { name: 'Semillero de calabacines', date: `${year}-04-01`, priority: 'media', category: 'semillero', notes: 'En macetas individuales, temperatura 20°C mínimo.' },
-    { name: 'Semillero de pepinos', date: `${year}-04-01`, priority: 'media', category: 'semillero', notes: 'Similar a calabacín. Ambiente cálido y húmedo.' },
-    { name: 'Instalar riego por goteo', date: `${year}-04-15`, priority: 'alta', category: 'riego', notes: 'Tender mangueras de goteo en ambos bancales. Programador con 2 riegos/día en verano.' },
-    { name: 'Trasplantar tomates al huerto', date: `${year}-05-01`, priority: 'alta', category: 'trasplante', notes: 'Cuando tengan 15-20cm y las noches >10°C. Enterrar hasta las primeras hojas.' },
-    { name: 'Trasplantar pimientos', date: `${year}-05-01`, priority: 'alta', category: 'trasplante', notes: 'Similar a tomates pero no enterrar el tallo.' },
-    { name: 'Trasplantar calabacines y pepinos', date: `${year}-05-10`, priority: 'media', category: 'trasplante', notes: 'Cuando hayan pasado las últimas heladas. Dejar espacio suficiente.' },
-    { name: 'Acolchado (mulch) en bancales', date: `${year}-05-15`, priority: 'media', category: 'acolchado', notes: 'Paja, cartón o corteza. Retiene humedad, evita malas hierbas, protege raíces.' },
-    { name: 'Colocar tutores para tomates', date: `${year}-05-10`, priority: 'alta', category: 'otro', notes: 'Cañas o estacas de 1.5m. Atar con hilo de rafia sin apretar.' },
-    { name: 'Instalar espalderas para pepinos', date: `${year}-05-10`, priority: 'media', category: 'otro', notes: 'Red o cañas para que trepen. Ahorra espacio y mejora la ventilación.' },
-    { name: 'Primera poda de tomates (chupones)', date: `${year}-06-01`, priority: 'media', category: 'poda', notes: 'Eliminar brotes axilares semanalmente. Dejar 1-2 tallos principales.' },
-    { name: 'Revisión de plagas y enfermedades', date: `${year}-06-15`, priority: 'media', category: 'tratamiento', notes: 'Buscar pulgón, mosca blanca, araña roja. Tratamiento ecológico: jabón potásico.' },
-  ];
-
-  const tasks = DB.get('tasks');
-  defaults.forEach(d => {
-    tasks.push({
-      id: Date.now() + Math.random() * 1000,
-      ...d,
-      done: false,
-    });
-  });
-  DB.set('tasks', tasks);
-  DB.setObj('seeded', { done: true });
-}
-
-// Seed initial diary entry for today's tomato seedbed
-function seedInitialDiary() {
-  if (DB.getObj('diary_seeded').done) return;
-
-  const entries = DB.get('diary');
-  entries.unshift({
-    id: Date.now(),
-    date: '2026-03-08',
-    type: 'semillero',
-    crops: ['tomate'],
-    notes: 'Hoy hice el semillero de tomate. Primer paso de la temporada.',
-    media: [],
-  });
-  DB.set('diary', entries);
-  DB.setObj('diary_seeded', { done: true });
 }
 
 // ============================================================
@@ -613,7 +600,7 @@ function escapeHtml(text) {
 }
 
 // ============================================================
-// SERVICE WORKER REGISTRATION
+// SERVICE WORKER
 // ============================================================
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -622,15 +609,19 @@ if ('serviceWorker' in navigator) {
 // ============================================================
 // INIT
 // ============================================================
-function init() {
-  seedDefaultTasks();
-  seedInitialDiary();
-  renderDiary();
-  renderTasks();
+async function init() {
+  showAuthorPicker();
+  updateAuthorDisplay();
   renderGardenLayout();
-  renderUpcomingTasks();
-  loadWeather();
-  loadWeatherHistory();
+
+  // Load data from server
+  await Promise.all([
+    loadDiary(),
+    loadTasks(),
+    loadUpcomingTasks(),
+    loadWeather(),
+    loadWeatherHistory(),
+  ]);
 }
 
 document.addEventListener('DOMContentLoaded', init);

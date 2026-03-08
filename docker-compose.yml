@@ -1,0 +1,13 @@
+services:
+  huerto:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - huerto_data:/app/backend/uploads
+      - huerto_db:/app/backend
+    restart: unless-stopped
+
+volumes:
+  huerto_data:
+  huerto_db:

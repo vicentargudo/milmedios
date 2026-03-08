@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+backend/uploads/
+backend/huerto.db
+.env
+*.swp
